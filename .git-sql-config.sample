@@ -1,0 +1,29 @@
+#!/usr/bin/perl
+
+# Rename this to .git-sql-config to get up and running
+
+%CONFIG = (	
+	# absolute path to where the git repo lies.
+	'repo' => '.git',
+
+	# SQL connection credentials
+	'connect' => {
+		'host' => 'localhost',
+		'user' => 'root',
+		'pass' => 'password',
+		'db' => 'database'
+	},
+
+	# For supporting other DB engines later on.  Only value 
+	# supported now is 'mysql'.
+	'engine' => 'mysql',
+
+	# Git's default primary branch name is 'master'.  If 
+	# your master branch is named something else, change here.
+	'master' => 'master',
+
+	# If 1, will automatically backup your DB into 'backups' 
+	# dir before git-sql runs inserts.  Set it if you're 
+	# cautious, this is beta after all.  No offense taken.
+	'auto_backup' => 0
+);

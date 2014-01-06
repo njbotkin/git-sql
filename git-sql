@@ -1,0 +1,538 @@
+#!/usr/bin/perl
+
+# compatibility: perl > 5.10.1 (given & //)
+
+use strict;
+use warnings;
+use diagnostics;
+
+use feature 'switch';
+use Getopt::Long;
+use DBI;
+use File::Find;
+use File::Copy;
+use File::Basename;
+use FindBin qw($RealBin);
+use Term::ANSIColor;
+
+# determine the location of git and its worktree
+	my ($git, $worktree, $git_dir);
+
+	GetOptions("g=s" => \$git_dir);
+
+	if( $ENV{'PWD'} =~ m/\.git$/ or $git_dir ) { # we're in the repo
+		$git = $git_dir // $ENV{'PWD'};
+
+		# read loc of worktree from git config
+		open(my $git_config, '<', "$git/config") or die "git dir invalid";
+		while( $worktree = <$git_config> ) {
+			$worktree =~ s/\tworktree = (.*)\n/$1/g;
+			last if $1;
+		}
+		close($git_config);
+	} 
+	elsif( -d '.git' ) { # we're in the worktree
+		$worktree = $ENV{'PWD'};
+		$git = "$worktree/.git";
+	} 
+	else {
+		print "No git repository set up.  git-sql requires git to function.\n" and exit;
+	}
+
+# git-sql init
+	if(defined($ARGV[0])) {
+		if($ARGV[0] eq 'init') {
+			if($ENV{'PWD'} =~ m/\.git$/) {
+				print "WARNING: you're about to make a bunch of git-sql files in a git repo.  You want to be doing this in the worktree.  Are you sure? [y/n]\n";
+				exit if <STDIN> eq "n\n";
+			}
+			my $init_fh;
+
+			# append git-sql commands to git hooks & add files to .gitignore
+			my %files = (
+				"$git/hooks/post-checkout"	=> 'git-sql -g=$GIT_DIR post-checkout $@',
+				"$git/hooks/post-merge"		=> 'git-sql -g=$GIT_DIR post-merge',
+				#"$git/hooks/post-receive"	=> 'git-sql -g=$GIT_DIR post-receive',
+				"$git/hooks/post-rewrite"	=> 'git-sql -g=$GIT_DIR post-rewrite',
+				"$git/hooks/pre-commit"		=> 'git-sql -g=$GIT_DIR pre-commit',
+				"$worktree/.gitignore" 		=> ".git-sql/backups/\*\n.git-sql-db\n.git-sql/config\n.git-sql/mastersave"
+			);
+			foreach my $file ( keys %files ) {
+				my $line = $files{$file};
+				open($init_fh, '>>', $file) or die "git-sql fatal: Unable to write to $file";
+				print $init_fh "\n\n# git-sql #\n\n$line\n\n# /git-sql #";
+				close($init_fh);
+				chmod(0755, $file) if !$file eq '.gitignore';
+			}
+
+			# copy sample config	
+			copy("$RealBin/\.git-sql-config\.sample", "$worktree/.git-sql/config.sample") or die "git-sql: creating config file failed: $!";
+
+			print "git-sql: configuration and operation files successfully set up.\n" and exit;
+		}
+	}
+
+# git-sql set up?
+	unless (-e "$worktree/.git-sql/config") {
+		print "git-sql hasn't been set up yet.  Do `git-sql init` in your worktree.\n" and exit;
+	} 
+
+# load up config
+	our %CONFIG;
+	do("$worktree/.git-sql/config") or die "git-sql: Couldn't read the config file";
+
+# get current branch name, append it to db name
+	open(my $fh, '<', "$git/HEAD");
+	chomp(my $HEAD = <$fh>);
+	close $fh;
+	$HEAD =~ s/^(.*)\///;
+
+	my $master_db = $CONFIG{'connect'}{'db'};
+	my $db_suffix = $HEAD eq $CONFIG{'master'} ? '' : "_$HEAD";
+	my $db = "$master_db$db_suffix";
+
+
+### OPEN CONNECTION ###
+sub open_connection {
+	my (@p) = @_;
+
+	my $db = $p['0'] // $db;
+	my $errors = $p['1'] // 1;
+
+	return DBI->connect("DBI:$CONFIG{'engine'}:$db", 
+	$CONFIG{'connect'}{'user'}, 
+	$CONFIG{'connect'}{'pass'},
+	{PrintError => $errors}) 
+		or die "git-sql: Couldn't connect to database: " . DBI->errstr;
+}
+
+### DUMP INDIVIDUAL TABLES ###
+sub dump_tables {
+	for($CONFIG{'engine'}) {
+		when('mysql') {
+			my $host = $CONFIG{'connect'}{'host'} eq 'localhost' ? '' : "-h $CONFIG{'connect'}{'host'}";
+
+			open(my $ignore_fh, '<', "$worktree/.git-sql/ignore");
+			my @ignore = <$ignore_fh>;
+
+			# Loop though tables. filter out ignored onses
+			if(my $dbh = open_connection($db, 0)) {
+				my $sth = $dbh->table_info; 
+				$sth->execute();
+				
+				while (my @row = $sth->fetchrow_array ) { 
+					my $table = $row['2'];
+
+					if (grep {$_ eq $table} @ignore) {
+						print color 'yellow';
+						print " skipped $table\n";
+						next;
+					}
+					
+					print color 'green';
+					print " dumping $table...\n";
+
+					print `mysqldump --opt --skip-extended-insert --skip-comments $host -u $CONFIG{'connect'}{'user'} -p$CONFIG{'connect'}{'pass'} $db --tables $table > $worktree/.git-sql/tables/$table.sql`;
+				}
+			}
+			
+			close($ignore_fh);
+			print color 'reset';
+		}
+	}
+}
+
+### INSERT SQL ###
+sub insert_tables {
+	my (@p) = @_;
+
+	my $ref = $p['0'] // 'HEAD^';
+
+	# Backup the DB first if necessary
+	if($CONFIG{'auto_backup'}) {
+		backup_db();
+	}
+
+	sub due_one {
+		my (@p) = @_;
+		my $file = $p['0'];
+
+		# determine savefile; mastersave takes precedence over save
+		my $savefile;
+		$savefile = "$worktree/.git-sql/save" if -e "$worktree/.git-sql/save";
+		$savefile = "$worktree/.git-sql/mastersave" if -e "$worktree/.git-sql/mastersave";
+
+		# Let's keep those environment-specific values
+		if($savefile) {
+			# run through the dump and replace with saved values
+			{
+				open(my $save_fh, '<', $savefile);
+				my @save_lines = <$save_fh>;
+				close($save_fh);
+
+				# pare down our bonny values
+				foreach my $line (@save_lines) {
+					$line =~ s/^(INSERT INTO \`(.*)\` VALUES \(([^,]*),)(.*)/$1/g;
+				}
+
+				local $^I = ""; # enable in-place editing
+				$ARGV['0'] = $file;
+				my $found;
+				while (<>) {
+					$found = 0;
+					foreach my $line (@save_lines) {
+						if(/\Q$line\E/) {
+							print $line;
+							$found = 1;
+							last;
+						}
+					}
+					print if !$found;
+				}
+			}
+		}
+		
+		# insert the file
+		given($CONFIG{'engine'}) {
+			when('mysql') {
+				my $host = $CONFIG{'connect'}{'host'} eq 'localhost' ? '' : "-h $CONFIG{'connect'}{'host'}";
+
+				my $response = `if ! mysql $host -u $CONFIG{'connect'}{'user'} -p$CONFIG{'connect'}{'pass'} $db < $file; then echo "err"; fi`;
+
+				# if all goes well, there should be no response
+				if($response) {
+					print color 'magenta';
+					print " failed to insert $file\n";
+					print color 'reset';
+				} else {
+					print color 'cyan';
+					print " inserted $file\n";
+					print color 'reset';
+				}
+			}
+		}
+	}
+
+	# list of changed files in the worktree, either from 
+	# the previous branch or the previous commit
+	my $changed = `git diff $ref --name-only --diff-filter=ACM`;
+
+	while ($changed =~ /(\.git-sql\/save)\n/g) {
+		if(-e "$worktree/.git-sql/mastersave") {
+			print "The save file has been either added or modified.  Update mastersave to reflect the changes? [y/n]\n";
+			masterscan() if <STDIN> eq "y\n";
+		}
+	}
+
+	# insert only into changed/new tables
+	while ($changed =~ /(\.git-sql\/tables\/([^\n]+))\n/g) {		
+		due_one("$worktree/$1");
+	}
+	
+	if($CONFIG{'auto_backup'}) {
+		print "git-sql: Deployment finished.  Run `git-sql restore` if it screwed up.\n";
+	}
+}
+
+### DUMP SQL TO SINGLE FILE ###
+sub dump_sql {
+	my (@p) = @_;
+
+	my $dump_name = $p['0'];
+
+	for($CONFIG{'engine'}) {
+		when('mysql') {
+			my $host = $CONFIG{'connect'}{'host'} eq 'localhost' ? '' : "-h $CONFIG{'connect'}{'host'}";
+
+			# Concatenate list of ignored tables into string
+			my $ignore_tables = "";
+			open(my $ignore_fh, '<', "$worktree/.git-sql/ignore");
+			while (my $line = <$ignore_fh>) {
+				chomp($line);
+				$ignore_tables .= "--ignore-table=$db.$line ";
+			}
+			close($ignore_fh);
+
+			my $response = `if ! mysqldump --opt --skip-extended-insert --skip-comments $host -u $CONFIG{'connect'}{'user'} -p$CONFIG{'connect'}{'pass'} $ignore_tables $db > $dump_name; then echo "err"; fi`;
+
+			# if all goes well, there should be no response
+			if($response) {
+				print color 'red';
+				print " failed to dump $dump_name\n";
+				print color 'reset';
+			} else {
+				print color 'green';
+				print " sql dump: $dump_name\n";
+				print color 'reset';
+			}
+		}
+	}
+}
+
+### INSERT SQL ###
+sub insert_sql {
+	my (@p) = @_;
+	my $dump = $p['0'];
+	
+	# insert the file
+	given($CONFIG{'engine'}) {
+		when('mysql') {
+			my $host = $CONFIG{'connect'}{'host'} eq 'localhost' ? '' : "-h $CONFIG{'connect'}{'host'}";
+			
+			print color 'cyan';
+
+			`pv "$dump" | mysql $host -u $CONFIG{'connect'}{'user'} -p$CONFIG{'connect'}{'pass'} $db`;
+			
+			$dump =~ s/$worktree\///g;
+			print " sql restore: $dump\n";
+			print color 'reset';
+		}
+	}
+}
+
+### SCAN ###
+sub scan {
+	my (@p) = @_;
+	my $append = $p['0'] // 0;
+
+	my $operator = $append eq 1 ? '>>' : '>';
+
+	dump_sql("$worktree/.git-sql/scan.sql");
+
+	`diff --old-line-format='' --new-line-format='%L' --unchanged-line-format='' $worktree/.git-sql/prescan.sql $worktree/.git-sql/scan.sql $operator $worktree/.git-sql/save`;
+
+	open(my $file_fh, '<', "$worktree/.git-sql/save") or die $!;
+	my $i = 0;
+	while (<$file_fh>) {
+		$i++;
+	}
+	close($file_fh);
+
+	print color 'green';
+	print " $i rows saved into .git-sql/save.\n\n";
+	print color 'reset';
+	print "From now on, in order for any changes of these values in the database to take effect, you need to edit them in .git-sql/save.\n";
+
+	unlink "$worktree/.git-sql/prescan.sql";
+	unlink "$worktree/.git-sql/scan.sql";
+}
+
+### MASTER SCAN ###
+sub masterscan {
+	dump_sql("$worktree/.git-sql/masterscan.sql");
+
+	if(-e "$worktree/.git-sql/save") {
+		my $mastervals;
+
+		open(my $save_fh, '<', "$worktree/.git-sql/save");
+		my @save_lines = <$save_fh>;
+		close($save_fh);
+
+		# pare down our bonny values
+		foreach my $line (@save_lines) {
+			$line =~ s/^(INSERT INTO \`(.*)\` VALUES \(([^,]*),)(.*)\n/$1/g;
+		}
+
+		open(my $master_fh, '>', "$worktree/.git-sql/mastersave");
+
+		my $i = 0;
+		open(my $db_fh, '<', "$worktree/.git-sql/masterscan.sql");
+		while ( my $sqlline = <$db_fh>) {
+			foreach my $line (@save_lines) {
+				if($sqlline =~ /\Q$line\E/) {
+					print $master_fh $sqlline;
+					$i++;
+					last;
+				}
+			}
+		}
+		close($db_fh);
+		close($master_fh);
+		
+		print color 'green';
+		print " $i rows saved into .git-sql/mastersave.\n";
+		print color 'reset';
+	}
+
+	unlink "$worktree/.git-sql/masterscan.sql";
+}
+
+### EDIT DB REFERENCE FILE ###
+sub edit_db_ref {
+	find(sub {
+		/\.git-sql-db/ or return;
+		open(my $fh, '>', $_);
+		print $fh $db;
+		close $fh;
+	}, $worktree);
+}
+
+### BACKUP DATABASE ###
+sub backup_db {
+	unless(-d "$worktree/.git-sql/backups") {
+		mkdir("$worktree/.git-sql/backups");
+	}
+
+	my $timestamp = time();
+	dump_sql("$worktree/.git-sql/backups/git-sql-dump_$HEAD-$timestamp");
+}
+
+### RESTORE DATABASE ###
+sub restore_db {
+	my $dir = "$worktree/.git-sql/backups";
+	opendir my $dh, $dir or die "Could not open $dir: $!";
+
+	my( $newest_name, $newest_time );
+
+	while( defined( my $file = readdir( $dh ) ) ) {
+		my $path = File::Spec->catfile( $dir, $file );
+		next if -d $path; # skip directories, or anything else you like
+		( $newest_name, $newest_time ) = ( $file, -M _ ) 
+			if( ! defined $newest_time or -M $path < $newest_time );
+	}
+
+	insert_sql("$dir/$newest_name");
+}
+
+# commands
+	$ARGV['0'] //= 'help';
+	for ($ARGV['0']) {
+
+		when ("help") {
+			print "usage: git-sql [-g=<git-dir>] <command> [<args>]\n\n";
+			print "The git-sql commands are:\n";
+			print "   prescan\t Dump the DB in preparation of scan\n";
+			print "   scan \t Diff recent changes into a 'save' file\n";
+			print "   appendscan\t Append new values to the 'save' file\n";
+			print "   masterscan\t Create a master save file mirroring the save file\n";
+			print "   dump \t Do a simple dump into a single .sql file\n";
+			print "   insert\t Insert a .sql file into DB\n";
+			print "   dumptables\t Dump tables into separate .sql files in .git-sql/tables\n";
+			print "   inserttables\t Insert table .sql files into DB\n";
+			print "   backup\t Dumps DB with timestamp into .git-sql/backups\n";
+			print "   restore\t Insert most recent backup into DB\n";
+			print "   commit\t Dump and commit DB changes to git\n";
+			print "   branch\t Delete the DB of a branch\n\n";
+		}
+
+		when ("prescan") {
+			dump_sql("$worktree/.git-sql/prescan.sql");
+		}
+
+		when ("scan") {
+			scan();
+		}
+
+		when ("appendscan") {
+			scan(1);
+		}
+
+		when ("masterscan") {
+			masterscan();
+		}
+
+		when ("dump") {
+			defined($ARGV[1]) or print "Usage: git-sql dump <filename>" and exit;
+			dump_sql($ARGV[1]);
+		}
+
+		when ("insert") {
+			defined($ARGV[1]) or print "Usage: git-sql insert <filename>" and exit;
+			insert_sql($ARGV[1]);
+		}
+
+		when ("dumptables") {
+			dump_tables();
+		}
+
+		when ("inserttables") {
+			insert_tables();
+		}
+
+		when ("backup") {
+			backup_db();
+		}
+
+		when ("restore") {
+			restore_db();
+		}
+		
+		# Usage: git-sql commit [-m] <commit-message>
+		when ("commit") {
+			my $message = "git-sql_$HEAD $db changes";
+			GetOptions("m=s" => \$message);
+
+			dump_tables();
+			`git commit -m "$message" --no-verify "$worktree/.git-sql/tables"`;
+		}
+
+		when ("pre-commit") {
+			#dump_sql();
+			#`git add ".git-sql-dump"`;
+		}
+
+		when ("post-checkout") {
+			if($ARGV[3]) {
+				edit_db_ref();
+				
+				# loop though heads, figure out which one was previous
+				my $ref;
+				my @files = <$git/refs/heads/*>;
+				foreach my $file (@files) {
+					open(my $file_fh, '<', $file) or die $!;
+					my $hash = <$file_fh>;
+					close($file_fh);
+					chomp($hash);
+					if ($hash eq $ARGV[1]) {
+						$file =~ /\/([^\/]+)$/g;
+						$ref = $1;
+						last;	
+					}
+				}
+
+				# check to see if DB exists, create a new one if it don't
+				unless(my $dbh = open_connection($db, 0)) {
+					if(DBI->err == 1049) { # DB doesn't exist, so connect to a DB that does
+						$dbh = open_connection($master_db);
+						$dbh->do("create database $db");
+						$dbh->disconnect();
+						
+						# insert the working table dumps into le branch database
+						insert_tables($ref);
+					}
+				}
+			}
+		}
+
+		when ("post-merge") {
+			insert_tables();
+			edit_db_ref();
+		}
+
+		when ("post-rewrite") {
+			insert_tables();
+			edit_db_ref();
+		}
+
+		when ("branch") {
+			my $branchname = '';
+			GetOptions("d=s" => \$branchname);
+
+			if($branchname) {
+				my $db = $master_db . '_' . $branchname;
+				if(my $dbh = open_connection($db, 0)) {
+					$dbh->do("drop database $db");
+					$dbh->disconnect();
+					print "Deleted branch $branchname\'s database ($db).\n";
+				} else {
+					print "Database $db doesn't exist.\n";
+				}
+			} else {
+				print "Usage: git-sql branch [-d] <branchname>\n";
+			}
+		}
+
+		default {
+			print "Command '",$ARGV['0'],"' not recognized.  Try git-sql help?\n";
+		}
+	}
