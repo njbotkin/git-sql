@@ -43,10 +43,14 @@ use Term::ANSIColor;
 	if(defined($ARGV[0])) {
 		if($ARGV[0] eq 'init') {
 			if($ENV{'PWD'} =~ m/\.git$/) {
-				print "WARNING: you're about to make a bunch of git-sql files in a git repo.  You want to be doing this in the worktree.  Are you sure? [y/n]\n";
+				print "WARNING: You're about to make a bunch of git-sql files in a git repo.  You want to be doing this in the worktree.  Are you sure? [y/n]\n";
 				exit if <STDIN> eq "n\n";
 			}
-			my $init_fh;
+			if (-d "$worktree/.git-sql") {
+				print "Git-SQL has already been set up.\n" and exit;
+			}
+
+			mkdir("$worktree/.git-sql");
 
 			# append git-sql commands to git hooks & add files to .gitignore
 			my %files = (
@@ -57,9 +61,11 @@ use Term::ANSIColor;
 				"$git/hooks/pre-commit"		=> 'git-sql -g=$GIT_DIR pre-commit',
 				"$worktree/.gitignore" 		=> ".git-sql/backups/\*\n.git-sql-db\n.git-sql/config\n.git-sql/mastersave"
 			);
+
+			my $init_fh;
 			foreach my $file ( keys %files ) {
 				my $line = $files{$file};
-				open($init_fh, '>>', $file) or die "git-sql fatal: Unable to write to $file";
+				open($init_fh, '>>', $file) or die "Git-SQL fatal: Unable to write to $file";
 				print $init_fh "\n\n# git-sql #\n\n$line\n\n# /git-sql #";
 				close($init_fh);
 				chmod(0755, $file) if !$file eq '.gitignore';
@@ -68,18 +74,18 @@ use Term::ANSIColor;
 			# copy sample config	
 			copy("$RealBin/\.git-sql-config\.sample", "$worktree/.git-sql/config.sample") or die "git-sql: creating config file failed: $!";
 
-			print "git-sql: configuration and operation files successfully set up.\n" and exit;
+			print "Git-SQL configuration and operation files successfully set up.\n" and exit;
 		}
 	}
 
 # git-sql set up?
 	unless (-e "$worktree/.git-sql/config") {
-		print "git-sql hasn't been set up yet.  Do `git-sql init` in your worktree.\n" and exit;
+		print "Git-SQL hasn't been set up yet.  Do `git-sql init` in your worktree.\n" and exit;
 	} 
 
 # load up config
 	our %CONFIG;
-	do("$worktree/.git-sql/config") or die "git-sql: Couldn't read the config file";
+	do("$worktree/.git-sql/config") or die "Couldn't read the Git-SQL config file";
 
 # get current branch name, append it to db name
 	open(my $fh, '<', "$git/HEAD");
@@ -103,7 +109,7 @@ sub open_connection {
 	$CONFIG{'connect'}{'user'}, 
 	$CONFIG{'connect'}{'pass'},
 	{PrintError => $errors}) 
-		or die "git-sql: Couldn't connect to database: " . DBI->errstr;
+		or die "Git-SQL: Couldn't connect to database: " . DBI->errstr;
 }
 
 ### DUMP INDIVIDUAL TABLES ###
@@ -230,7 +236,7 @@ sub insert_tables {
 	}
 	
 	if($CONFIG{'auto_backup'}) {
-		print "git-sql: Deployment finished.  Run `git-sql restore` if it screwed up.\n";
+		print "Git-SQL deployment finished.  Do `git-sql restore` if it screwed up.\n";
 	}
 }
 
