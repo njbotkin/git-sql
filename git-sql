@@ -405,20 +405,20 @@ sub restore_db {
 	for ($ARGV['0']) {
 
 		when ("help") {
-			print "usage: git-sql [-g=<git-dir>] <command> [<args>]\n\n";
-			print "The git-sql commands are:\n";
-			print "   prescan\t Dump the DB in preparation of scan\n";
-			print "   scan \t Diff recent changes into a 'save' file\n";
-			print "   appendscan\t Append new values to the 'save' file\n";
-			print "   masterscan\t Create a master save file mirroring the save file\n";
-			print "   dump \t Do a simple dump into a single .sql file\n";
-			print "   insert\t Insert a .sql file into DB\n";
-			print "   dumptables\t Dump tables into separate .sql files in .git-sql/tables\n";
-			print "   inserttables\t Insert table .sql files into DB\n";
-			print "   backup\t Dumps DB with timestamp into .git-sql/backups\n";
-			print "   restore\t Insert most recent backup into DB\n";
-			print "   commit\t Dump and commit DB changes to git\n";
-			print "   branch\t Delete the DB of a branch\n\n";
+			print "Usage: git-sql [-g=<git-dir>] <command> [<args>]\n\n";
+			print "The commands are:\n";
+			print "   prescan        Dump the DB in preparation of scan\n";
+			print "   scan           Diff recent changes into a 'save' file\n";
+			print "   appendscan     Append new values to the 'save' file\n";
+			print "   masterscan     Create a master save file mirroring the save file\n";
+			print "   dump           Do a simple dump into a single .sql file\n";
+			print "   insert         Insert a .sql file into DB\n";
+			print "   dumptables     Dump tables into separate .sql files in .git-sql/tables\n";
+			print "   inserttables   Insert table .sql files into DB\n";
+			print "   backup         Dumps DB with timestamp into .git-sql/backups\n";
+			print "   restore        Insert most recent backup into DB\n";
+			print "   commit         Dump and commit DB changes to git\n";
+			print "   branch         Delete the DB of a branch\n\n";
 		}
 
 		when ("prescan") {
