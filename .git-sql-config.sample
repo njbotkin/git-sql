@@ -3,9 +3,6 @@
 # Rename this to .git-sql-config to get up and running
 
 %CONFIG = (	
-	# absolute path to where the git repo lies.
-	'repo' => '.git',
-
 	# SQL connection credentials
 	'connect' => {
 		'host' => 'localhost',

@@ -65,7 +65,7 @@ use Term::ANSIColor;
 			my $init_fh;
 			foreach my $file ( keys %files ) {
 				my $line = $files{$file};
-				open($init_fh, '>>', $file) or die "Git-SQL fatal: Unable to write to $file";
+				open($init_fh, '>>', $file) or die "Git-SQL fatal: Unable to write to $file $!";
 				print $init_fh "\n\n# git-sql #\n\n$line\n\n# /git-sql #";
 				close($init_fh);
 				chmod(0755, $file) if !$file eq '.gitignore';
@@ -413,8 +413,8 @@ sub restore_db {
 			print "   masterscan     Create a master save file mirroring the save file\n";
 			print "   dump           Do a simple dump into a single .sql file\n";
 			print "   insert         Insert a .sql file into DB\n";
-			print "   dumptables     Dump tables into separate .sql files in .git-sql/tables\n";
-			print "   inserttables   Insert table .sql files into DB\n";
+			print "   refresh        Dump tables into separate .sql files in .git-sql/tables\n";
+			print "   update         Insert table .sql files into DB\n";
 			print "   backup         Dumps DB with timestamp into .git-sql/backups\n";
 			print "   restore        Insert most recent backup into DB\n";
 			print "   commit         Dump and commit DB changes to git\n";
@@ -447,11 +447,11 @@ sub restore_db {
 			insert_sql($ARGV[1]);
 		}
 
-		when ("dumptables") {
+		when ("refresh") {
 			dump_tables();
 		}
 
-		when ("inserttables") {
+		when ("update") {
 			insert_tables();
 		}
 
