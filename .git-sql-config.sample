@@ -21,6 +21,6 @@
 
 	# If 1, will automatically backup your DB into 'backups' 
 	# dir before git-sql runs inserts.  Set it if you're 
-	# cautious, this is beta after all.  No offense taken.
+	# cautious, this is alpha after all.  No offense taken.
 	'auto_backup' => 0
 );
