@@ -30,6 +30,7 @@ use Term::ANSIColor;
 			last if $1;
 		}
 		close($git_config);
+		print "Git-SQL couldn't determine the location of the worktree.\n" and exit if !$worktree;
 	} 
 	elsif( -d '.git' ) { # we're in the worktree
 		$worktree = $ENV{'PWD'};
@@ -42,10 +43,6 @@ use Term::ANSIColor;
 # git-sql init
 	if(defined($ARGV[0])) {
 		if($ARGV[0] eq 'init') {
-			if($ENV{'PWD'} =~ m/\.git$/) {
-				print "WARNING: You're about to make a bunch of git-sql files in a git repo.  You want to be doing this in the worktree.  Are you sure? [y/n]\n";
-				exit if <STDIN> eq "n\n";
-			}
 			if (-e "$worktree/.git-sql/config") {
 				print "Git-SQL has already been set up.\n" and exit;
 			}
@@ -58,7 +55,7 @@ use Term::ANSIColor;
 				"$git/hooks/post-merge"		=> 'git-sql -g=$GIT_DIR post-merge',
 				#"$git/hooks/post-receive"	=> 'git-sql -g=$GIT_DIR post-receive',
 				"$git/hooks/post-rewrite"	=> 'git-sql -g=$GIT_DIR post-rewrite',
-				"$git/hooks/pre-commit"		=> 'git-sql -g=$GIT_DIR pre-commit',
+				#"$git/hooks/pre-commit"		=> 'git-sql -g=$GIT_DIR pre-commit',
 				"$worktree/.gitignore" 		=> ".git-sql/backups/\*\n.git-sql-db\n.git-sql/config\n.git-sql/mastersave"
 			);
 
