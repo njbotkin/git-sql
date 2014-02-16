@@ -106,6 +106,8 @@ use Term::ANSIColor;
 			when('mysql') {
 				my $host = $CONFIG{'connect'}{'host'} eq 'localhost' ? '' : "-h $CONFIG{'connect'}{'host'}";
 
+				mkdir "$worktree/.git-sql/tables" unless -d "$worktree/.git-sql/tables";
+
 				open(my $ignore_fh, '<', "$worktree/.git-sql/ignore");
 				my @ignore = <$ignore_fh>;
 
@@ -395,9 +397,7 @@ use Term::ANSIColor;
 
 	# BACKUP DATABASE #
 	sub backup_db {
-		unless(-d "$worktree/.git-sql/backups") {
-			mkdir("$worktree/.git-sql/backups");
-		}
+		mkdir("$worktree/.git-sql/backups") unless -d "$worktree/.git-sql/backups";
 
 		my $timestamp = time();
 		dump_sql("$worktree/.git-sql/backups/git-sql-dump_$HEAD-$timestamp");
