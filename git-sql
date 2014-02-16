@@ -71,7 +71,7 @@ use Term::ANSIColor;
 			# copy sample config	
 			copy("$RealBin/\.git-sql-config\.sample", "$worktree/.git-sql/config.sample") or die "git-sql: creating config file failed: $!";
 
-			print "Git-SQL configuration and operation files successfully set up.\n" and exit;
+			print "Git-SQL configuration and operation files successfully set up in $worktree.\n" and exit;
 		}
 	}
 
