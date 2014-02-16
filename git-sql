@@ -119,10 +119,10 @@ use Term::ANSIColor;
 					while (my @row = $sth->fetchrow_array ) { 
 						my $table = $row['2'];
 
-						if (grep {$_ eq $table} @ignore) {
+						if ( grep( /^$table$/, @ignore) ) {
 							# create sql file and fill it with schema, no data
 							unless (-f "$worktree/.git-sql/tables/$table.sql") {
-								`mysqldump --no-data --opt --skip-extended-insert --skip-comments $host -u $CONFIG{'connect'}{'user'} -p'$CONFIG{'connect'}{'pass'}' $db --tables $table > $worktree/.git-sql/tables/$table.sql`;
+								print `mysqldump --no-data --skip-comments $host -u $CONFIG{'connect'}{'user'} -p'$CONFIG{'connect'}{'pass'}' $db --tables $table > $worktree/.git-sql/tables/$table.sql`;
 							}
 							print color 'yellow';
 							print " skipped $table\n";
