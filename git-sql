@@ -126,7 +126,7 @@ use Term::ANSIColor;
 						print color 'green';
 						print " dumping $table...\n";
 
-						print `mysqldump --opt --skip-extended-insert --skip-comments $host -u $CONFIG{'connect'}{'user'} -p$CONFIG{'connect'}{'pass'} $db --tables $table > $worktree/.git-sql/tables/$table.sql`;
+						print `mysqldump --opt --skip-extended-insert --skip-comments $host -u $CONFIG{'connect'}{'user'} -p'$CONFIG{'connect'}{'pass'}' $db --tables $table > $worktree/.git-sql/tables/$table.sql`;
 					}
 				}
 				
@@ -356,7 +356,7 @@ use Term::ANSIColor;
 				}
 				close($ignore_fh);
 
-				my $response = `if ! mysqldump --opt --skip-extended-insert --skip-comments $host -u $CONFIG{'connect'}{'user'} -p$CONFIG{'connect'}{'pass'} $ignore_tables $db > $dump_name; then echo "err"; fi`;
+				my $response = `if ! mysqldump --opt --skip-extended-insert --skip-comments $host -u $CONFIG{'connect'}{'user'} -p'$CONFIG{'connect'}{'pass'}' $ignore_tables $db > $dump_name; then echo "err"; fi`;
 
 				# if all goes well, there should be no response
 				if($response) {

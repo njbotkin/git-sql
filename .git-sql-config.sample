@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 
-# Rename this to .git-sql-config to get up and running
+# Rename this to config to get up and running
 
 %CONFIG = (	
 	# SQL connection credentials
