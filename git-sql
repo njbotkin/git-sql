@@ -489,7 +489,7 @@ use Term::ANSIColor;
 		
 		# Usage: git-sql commit [-m] <commit-message>
 		when ("commit") {
-			my $message = "git-sql_$HEAD $db changes";
+			my $message = "git-sql_$HEAD $db refresh";
 			GetOptions("m=s" => \$message);
 
 			dump_tables();
