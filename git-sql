@@ -200,7 +200,7 @@ use Term::ANSIColor;
 				when('mysql') {
 					my $host = $CONFIG{'connect'}{'host'} eq 'localhost' ? '' : "-h $CONFIG{'connect'}{'host'}";
 
-					my $response = `if ! mysql $host -u $CONFIG{'connect'}{'user'} -p$CONFIG{'connect'}{'pass'} $db < $file; then echo "err"; fi`;
+					my $response = `if ! mysql $host -u $CONFIG{'connect'}{'user'} -p'$CONFIG{'connect'}{'pass'}' $db < $file; then echo "err"; fi`;
 
 					# if all goes well, there should be no response
 					if($response) {
@@ -390,7 +390,7 @@ use Term::ANSIColor;
 				
 				print color 'cyan';
 
-				`pv "$dump" | mysql $host -u $CONFIG{'connect'}{'user'} -p$CONFIG{'connect'}{'pass'} $db`;
+				`pv "$dump" | mysql $host -u $CONFIG{'connect'}{'user'} -p'$CONFIG{'connect'}{'pass'}' $db`;
 				
 				$dump =~ s/$worktree\///g;
 				print " sql restore: $dump\n";
