@@ -476,6 +476,9 @@ use Term::ANSIColor;
 		}
 
 		when ("update") {
+			print "You're about to insert into the database $db.  Continue? [y/n]\n";
+			exit unless <STDIN> eq "y\n";
+
 			insert_tables();
 		}
 
